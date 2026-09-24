@@ -83,9 +83,7 @@ def track_flight_direction(track_reg_result, epsilon=1e-8):
     sin_theta = torch.sin(theta)
     cos_theta = torch.cos(theta)
 
-    direction = torch.stack(
-        [sin_theta * cos_phi, sin_theta * sin_phi, cos_theta], dim=-1
-    )
+    direction = torch.stack([sin_theta * cos_phi, sin_theta * sin_phi, cos_theta], dim=-1)
     direction_length = direction.norm(dim=-1, keepdim=True).clamp(min=epsilon)
     return direction / direction_length
 
@@ -202,10 +200,6 @@ def fit_vertex_by_closest_approach(
 
 class VertexHead(nn.Module):
     """
-    Wires track_position_from_hits + track_flight_direction +
-    fit_vertex_by_closest_approach together, using the track finder's own
-    outputs to build each track's weight.
-
     Zero learnable parameters by default (learn_weights=False): the
     per-track weight is simply (soft hit count) x (P(real track)), and
     everything downstream of that is the fixed linear solve above --
