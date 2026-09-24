@@ -806,4 +806,68 @@ def _run_test_case(outputs, targets, mask, case_name):
         assert perfect_losses["loss_focal"] < 1e-4, f"Focal loss not perfect: {perfect_losses['loss_focal']}"
         print(f"Perfect {case_name} losses:", {k: v.item() for k, v in perfect_losses.items()})
 
+def vertex_reg_loss(pred, target, valid, option="l1"):
+    """
+    Regression loss for the fitted vertex position.
+
+    Args:
+        pred: (B, 3) - Predicted vertex position (vtx_x, vtx_y, vtx_z)
+        target: (B, 3) - Ground truth vertex position
+        valid: (B,) - Valid-event mask (events with no valid hit are excluded)
+        option: "l1" or "mse" loss
+
+    Returns:
+        loss: scalar tensor
+    """
+    if valid.sum() == 0:
+        return {"loss": torch.tensor(0.0, device=pred.device)}
+
+    pred_v = pred[valid]
+    target_v = target[valid]
+
+    if option == "mse":
+        loss = F.mse_loss(pred_v, target_v, reduction="mean")
+    else:
+        loss = F.l1_loss(pred_v, target_v, reduction="mean")
+
+    return {"loss": loss}
+
+
+@torch.no_grad()
+def compute_vertex_metrics(pred, target, valid, tol_cm=(0.5, 1.0, 2.0)):
+    """
+    Computes vertex reconstruction accuracy and resolution metrics.
+
+    Args:
+        pred: (B, 3) - Predicted vertex position
+        target: (B, 3) - Ground truth vertex position
+        valid: (B,) - Valid-event mask (events with no valid hit are excluded)
+        tol_cm: Distance thresholds (cm) for accuracy
+
+    Returns:
+        accuracy@{t}cm: fraction of valid events within each tolerance
+        mae_x, mae_y, mae_z: mean absolute error per axis (cm)
+        rmse_3d: root mean squared 3D distance (cm)
+    """
+    pred_v = pred[valid].detach()
+    target_v = target[valid].detach()
+
+    if pred_v.shape[0] == 0:
+        nan_metrics = {f"accuracy@{t}cm": float("nan") for t in tol_cm}
+        nan_metrics.update({"mae_x": float("nan"), "mae_y": float("nan"),
+                             "mae_z": float("nan"), "rmse_3d": float("nan")})
+        return nan_metrics
+
+    residual = pred_v - target_v          # (M, 3)
+    dist_3d = residual.norm(dim=-1)       # (M,) Euclidean miss-distance per event
+    abs_err = residual.abs()              # (M, 3)
+
+    metrics = {f"accuracy@{t}cm": (dist_3d < t).float().mean().item() for t in tol_cm}
+    metrics["mae_x"] = abs_err[:, 0].mean().item()
+    metrics["mae_y"] = abs_err[:, 1].mean().item()
+    metrics["mae_z"] = abs_err[:, 2].mean().item()
+    metrics["rmse_3d"] = dist_3d.pow(2).mean().sqrt().item()
+    return metrics
+
+
 #test_point_loss()

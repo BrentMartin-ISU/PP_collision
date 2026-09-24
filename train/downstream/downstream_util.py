@@ -79,3 +79,48 @@ def get_weakdecaylabel(mid):
     return {
         "weak_decay_class": weak_decay_class,  # B X N tensor with weak decay labels (1 for K0, 0 otherwise)
     }
+
+def get_vertex_label(reg, valid_tracks=None, valid_radius_cm=1.0, z_cut_cm=None):
+    """
+    Ground-truth vertex position for VertexHead: mean (vtx_x, vtx_y, vtx_z)
+    over hits/tracks near the origin, aggregated per event.
+
+    Args:
+        reg: (B, N, 8) - per-hit regression target tensor (same columns as get_trackinfo_noiselabel)
+        valid_tracks: (B, N) bool/int, optional - if None, recomputed exactly like
+            get_trackinfo_noiselabel: vtx_r = sqrt(vtx_x^2 + vtx_y^2) < valid_radius_cm
+            (NOTE: transverse-only cut, same as the original)
+        valid_radius_cm: transverse radius cut used when valid_tracks is None
+        z_cut_cm: optional float - if set, ALSO requires |vtx_z| < z_cut_cm
+
+    Returns:
+        vertex_target: (B, 3) - mean (vtx_x, vtx_y, vtx_z) over hits/tracks flagged valid
+            for that event; the regression target for VertexHead
+        vertex_valid: (B,) bool - whether the event had >=1 valid hit to average (events
+            with none should be excluded from the loss, not trained toward a meaningless
+            zero-vector target)
+        n_valid: (B,) long - how many hits contributed, for logging/debugging class imbalance
+    """
+    vtx_x = reg[..., 3]
+    vtx_y = reg[..., 4]
+    vtx_z = reg[..., 5]
+
+    if valid_tracks is None:
+        vtx_r = torch.sqrt(vtx_x ** 2 + vtx_y ** 2)
+        valid_tracks = vtx_r < valid_radius_cm  # (B, N)
+        if z_cut_cm is not None:
+            valid_tracks = valid_tracks & (vtx_z.abs() < z_cut_cm)
+
+    valid_f = valid_tracks.float()  # (B, N)
+    n_valid = valid_f.sum(dim=-1)  # (B,)
+    counts = n_valid.clamp(min=1)  # avoid div-by-zero; masked out via vertex_valid anyway
+
+    vx = (vtx_x * valid_f).sum(dim=-1) / counts
+    vy = (vtx_y * valid_f).sum(dim=-1) / counts
+    vz = (vtx_z * valid_f).sum(dim=-1) / counts
+
+    return {
+        "vertex_target": torch.stack([vx, vy, vz], dim=-1),  # (B, 3)
+        "vertex_valid": n_valid > 0,  # (B,)
+        "n_valid": n_valid.long(),  # (B,)
+    }
