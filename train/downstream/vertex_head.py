@@ -4,33 +4,27 @@ point on the track plus its direction of flight. The primary vertex is
 taken to be the single point that minimizes the weighted sum of squared
 perpendicular distances to every track's line, all at once. No
 covariance matrix is used; each track is weighted by how many hits
-support it and how confident the track finder is that it's real, which
-plays the same role a covariance-based weight would in a Kalman-style fit.
-
-This module has ZERO free parameters by default -- it is a closed-form
-linear solve, not a trained network. Everything it needs comes straight
-out of the already-trained track-finding head (MambaAttentionHead in
-model.py).
+are on it and how confident the track finder is that it's real which is
+output by the track finder. This is a pure linear algebra solution, there
+is no machine learning calculation (yet). Everything it needs comes straight
+out of the already-trained track-finding head (MambaAttentionHead in model.py).
 
 Per-track quantities used, and where they come from:
 
     track_position  (n_events, n_tracks, 3)
         A point the track's line of flight passes through: specifically,
         the position of the single assigned hit closest to the origin --
-        the innermost measurement on that track (see
-        track_position_from_hits below). This is a real spatial position
-        from this track's own hits.
+        the innermost measurement on that track (see track_position_from_hits
+        below). This is a real spatial position from this track's own hits.
 
     track_direction (n_events, n_tracks, 3)
-        A unit vector along the track's flight direction, reconstructed
-        from the track-finding head's regressed (theta, sin(phi),
-        cos(phi)) -- see track_flight_direction below.
+        A unit vector along the track's flight direction, reconstructed from
+        the track-finding head's regressed (theta, sin(phi), cos(phi))
 
     track_weight (n_events, n_tracks)
         How much this track counts in the fit: the number of hits
-        supporting it (a soft/fractional count, since mask_probs is a
-        probability, not a hard assignment) times the track finder's own
-        confidence that this slot is a real track and not an empty one.
+        on the track times the track finder's own confidence that
+        this slot is a real track and not an empty one.
         
 Inputs, all produced by MambaAttentionHead.forward() (model.py) with no
 modifications needed there:
@@ -39,7 +33,7 @@ modifications needed there:
     track_reg_result (n_events, n_tracks, 4)   (q/(pT+1), theta, sin(phi), cos(phi))
     mask_probs       (n_events, n_hits, n_tracks)  soft hit-to-track assignment
     points           (n_events, n_hits, 4)     raw (E, x, y, z) hits fed to the backbone
-    padding_mask     (n_events, n_hits)        True where a hit is real (not padding)
+    padding_mask     (n_events, n_hits)        True when a hit is real (i.e. not padding)
 
 theta is the polar angle from the beam axis; phi is the azimuthal angle
 
@@ -48,6 +42,7 @@ candidate vertex PV,
 
     DCA = | X - PV - [S.(X - PV) / S.S] S |
 
+where S = (p_x/p, p_y/p, p_z/p), i.e. the unit momentum vector. 
 fit_vertex_by_closest_approach below is exactly this DCA, squared,
 weighted, and summed over every track in the event -- a chi-square
 as a function of a candidate PV -- solved for the PV that minimizes it,
@@ -60,11 +55,10 @@ where track_direction is evaluated, which reduces this curvature bias but
 does not remove it. Removing it properly means re-evaluating each track's
 position and direction at the point on its actual helix nearest the
 current vertex estimate, and iterating -- which needs the magnetic field
-strength and a confirmed length-unit convention for this dataset's
-vtx_x/y/z and momentum (see dataset.py's `data_scaler`, currently a
-placeholder value of 1). The straight-line fit below is exact only in the
-zero-field limit / for short lever arms; treat it as a first version, not
-a substitute for that helical refinement.
+strength and units for this dataset's vtx_x/y/z and momentum (see dataset.py's 
+`data_scaler`, currently a placeholder value of 1). The straight-line fit 
+below is exact only in the zero-field limit / for short lever arms; treat 
+it as a first version, not a substitute for that helical refinement.
 """
 
 import torch
